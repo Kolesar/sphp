@@ -1,0 +1,116 @@
+#!/bin/bash
+#
+# Author: Asim Husanovic
+# Email: asim.husanovic@gmail.com
+
+supported_php_version=()
+php_version="$1"
+
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root" 
+   exit 1
+fi
+
+# Get all installed PHP versions
+BIN_DIR="/usr/bin/php*"
+for phpfile in $BIN_DIR;
+do
+    if [ ! -L $phpfile ] && 
+        [[ "$phpfile" != *"-config" ]] && 
+        [[ "$phpfile" != *"-cgi" ]] && 
+        [[ "$phpfile" != *"phpize"* ]]; then
+        supported_php_version+=($(basename "$phpfile"))
+    fi
+done
+
+if [ ${#supported_php_version[@]} -le 0 ]; then
+    echo -e "You are not have any PHP version on your system!"
+    exit
+fi
+
+# Has the user submitted a version required
+if [[ -z $php_version ]]
+then
+    echo -e "usage: sphp version";
+    echo -e "    version one of:" ${supported_php_version[@]};
+    exit;
+fi
+
+for php_v in "${supported_php_version[@]}"; do
+    if [[ $php_v == "$php_version" ]]; then
+        match=1
+        break
+    fi
+done
+
+if [ ! $match ]; then
+    echo -e "Only follow arguments (PHP versions) are allowed: ${supported_php_version[@]}"
+    exit 0;
+fi
+
+
+echo -e "Stopping Apache service..."
+service apache stop
+
+service apache status > /tmp/server-apache2.txt &
+sleep 1
+while ! grep -m1 'inactive (dead)\|failed' < /tmp/server-apache2.txt; do
+    sleep 1
+    service apache status > /tmp/server-apache2.txt &
+done
+rm -rf /tmp/server-apache2.txt
+echo -e "Apache has been stopped."
+
+
+echo -e "Switching Apache configuration file..."
+if [[ "$php_version" == "php708" ]]; then
+    unlink /etc/php7
+    ln -s /etc/$php_version /etc/php7
+
+    a2dismod php5
+    a2enmod php7
+
+    unlink /usr/lib64/apache2/mod_php7.so
+    ln -s /usr/lib64/apache2/mod_$php_version.so /usr/lib64/apache2/mod_php7.so
+elif [[ "$php_version" == "php721" ]]; then
+    unlink /etc/php7
+    ln -s /etc/$php_version /etc/php7
+
+    a2dismod php5
+    a2enmod php7
+
+    unlink /usr/lib64/apache2/mod_php7.so
+    ln -s /usr/lib64/apache2/mod_$php_version.so /usr/lib64/apache2/mod_php7.so
+elif [[ "$php_version" == "php56" ]]; then
+    unlink /etc/php5
+    ln -s /etc/$php_version /etc/php5
+
+    a2dismod php7
+    a2enmod php5
+
+    unlink /usr/lib64/apache2/mod_php5.so
+    ln -s /usr/lib64/apache2/mod_$php_version.so /usr/lib64/apache2/mod_php5.so
+fi
+echo -e "Switching Apache configuration has been done."
+
+
+echo -e "Making a new link to selected PHP version..."
+unlink /usr/bin/php
+ln -s /usr/bin/$php_version /usr/bin/php
+
+unlink /usr/bin/php-cgi
+ln -s /usr/bin/$php_version-cgi /usr/bin/php-cgi
+echo -e "Making a new link to selected PHP version has been done."
+
+
+echo -e "Starting Apache service..."
+service apache start 
+
+service apache status > /tmp/server-apache2.txt &
+sleep 1
+while ! grep -m1 'active (running)' < /tmp/server-apache2.txt; do
+    sleep 1
+    service apache status > /tmp/server-apache2.txt &
+done
+rm -rf /tmp/server-apache2.txt
+echo -e "Apache has been started."
